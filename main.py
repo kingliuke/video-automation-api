@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import subprocess
 import requests
 import os
@@ -21,9 +22,19 @@ app.add_middleware(
 TEMP_DIR = Path("/tmp/videos")
 TEMP_DIR.mkdir(exist_ok=True)
 
+# Pydantic models for request validation
+class CutInstruction(BaseModel):
+    start: str
+    end: str
+    reason: str = ""
+
+class CutVideoRequest(BaseModel):
+    video_url: str
+    cuts: List[CutInstruction]
+
 @app.get("/")
 def home():
-    return {"status": "online", "message": "Video automation API is running!", "version": "0.2.0"}
+    return {"status": "online", "message": "Video automation API is running!", "version": "0.3.0"}
 
 @app.get("/health")
 def health_check():
@@ -201,7 +212,7 @@ def cut_video(video_path: str, keep_segments: List[Dict], output_path: str) -> b
         return False
 
 @app.post("/cut-video")
-async def execute_cut(video_url: str, cuts: List[Dict]):
+async def execute_cut(request: CutVideoRequest):
     """
     Main endpoint to cut video based on cut instructions
     
@@ -219,7 +230,7 @@ async def execute_cut(video_url: str, cuts: List[Dict]):
         video_id = "input_video"
         input_path = TEMP_DIR / f"{video_id}.mp4"
         
-        success = download_video(video_url, str(input_path))
+        success = download_video(request.video_url, str(input_path))
         if not success:
             raise HTTPException(status_code=400, detail="Failed to download video")
         
@@ -228,8 +239,11 @@ async def execute_cut(video_url: str, cuts: List[Dict]):
         if duration == 0:
             raise HTTPException(status_code=400, detail="Could not determine video duration")
         
+        # Convert cuts to dict format
+        cuts_dict = [cut.dict() for cut in request.cuts]
+        
         # Calculate segments to keep
-        keep_segments = create_keep_segments(cuts, duration)
+        keep_segments = create_keep_segments(cuts_dict, duration)
         
         # Cut video
         output_path = TEMP_DIR / f"output_{video_id}.mp4"
@@ -244,7 +258,7 @@ async def execute_cut(video_url: str, cuts: List[Dict]):
         return {
             "status": "success",
             "original_duration": round(duration, 2),
-            "cuts_applied": len(cuts),
+            "cuts_applied": len(request.cuts),
             "segments_kept": len(keep_segments),
             "output_path": str(output_path),
             "output_size_mb": round(output_size / (1024 * 1024), 2),
