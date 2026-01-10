@@ -4,6 +4,8 @@ import subprocess
 import requests
 import os
 from pathlib import Path
+import json
+from typing import List, Dict
 
 app = FastAPI()
 
@@ -55,7 +57,7 @@ def download_video(video_url: str, output_path: str) -> bool:
         print(f"Download error: {e}")
         return False
 
-@app.post("/download-video")
+@app.get("/download-video")
 def test_download(video_url: str):
     """Test endpoint to download a video"""
     video_id = "test_video"
@@ -73,13 +75,6 @@ def test_download(video_url: str):
         }
     else:
         raise HTTPException(status_code=400, detail="Failed to download video")
-
-@app.post("/process-video")
-def process_video(video_url: str, cut_instructions: dict):
-    return {"status": "received", "video_url": video_url, "message": "Processing!"}
-
-import json
-from typing import List, Dict
 
 def time_to_seconds(time_str: str) -> float:
     """Convert time string (HH:MM:SS or MM:SS) to seconds"""
@@ -260,3 +255,7 @@ async def execute_cut(video_url: str, cuts: List[Dict]):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@app.post("/process-video")
+def process_video(video_url: str, cut_instructions: dict):
+    return {"status": "received", "video_url": video_url, "message": "Processing!"}
