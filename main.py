@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import json
 from typing import List, Dict
+import base64
+import cv2
 
 app = FastAPI()
 
@@ -34,7 +36,7 @@ class CutVideoRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return {"status": "online", "message": "Video automation API is running!", "version": "0.3.0"}
+    return {"status": "online", "message": "Video automation API is running!", "version": "0.4.0"}
 
 @app.get("/health")
 def health_check():
@@ -210,6 +212,84 @@ def cut_video(video_path: str, keep_segments: List[Dict], output_path: str) -> b
     except Exception as e:
         print(f"Cut video error: {e}")
         return False
+
+def extract_frames_from_video(video_path: str, fps: float = 1.0, max_frames: int = 100) -> List[str]:
+    """Extract frames from video and return as base64 strings"""
+    frames = []
+    cap = cv2.VideoCapture(video_path)
+    
+    if not cap.isOpened():
+        return frames
+    
+    video_fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_interval = int(video_fps / fps)
+    
+    frame_count = 0
+    extracted_count = 0
+    
+    while extracted_count < max_frames:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        if frame_count % frame_interval == 0:
+            # Resize frame to reduce size (640x360 is good for API)
+            height, width = frame.shape[:2]
+            new_width = 640
+            new_height = int(height * (new_width / width))
+            frame_resized = cv2.resize(frame, (new_width, new_height))
+            
+            # Encode to base64
+            _, buffer = cv2.imencode('.jpg', frame_resized, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            frame_base64 = base64.b64encode(buffer).decode('utf-8')
+            frames.append(frame_base64)
+            extracted_count += 1
+        
+        frame_count += 1
+    
+    cap.release()
+    return frames
+
+@app.post("/extract-frames")
+async def extract_frames_endpoint(video_url: str, fps: float = 1.0, max_frames: int = 100):
+    """
+    Extract frames from video for GPT-4o analysis
+    
+    Parameters:
+    - video_url: URL of the video to process
+    - fps: Frames per second to extract (default 1.0 = 1 frame per second)
+    - max_frames: Maximum number of frames to extract (default 100)
+    
+    Returns base64 encoded JPEG images ready to send to GPT-4o
+    """
+    try:
+        # Download video
+        video_id = "extract_frames_video"
+        video_path = TEMP_DIR / f"{video_id}.mp4"
+        
+        success = download_video(video_url, str(video_path))
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to download video")
+        
+        # Extract frames
+        frames = extract_frames_from_video(str(video_path), fps, max_frames)
+        
+        if not frames:
+            raise HTTPException(status_code=500, detail="Failed to extract frames from video")
+        
+        return {
+            "status": "success",
+            "frames_count": len(frames),
+            "frames": frames,  # Array of base64 encoded images
+            "fps": fps,
+            "max_frames": max_frames,
+            "note": "Frames are base64 encoded JPEGs (640px width), ready for GPT-4o"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @app.post("/cut-video")
 async def execute_cut(request: CutVideoRequest):
