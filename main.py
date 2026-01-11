@@ -34,9 +34,14 @@ class CutVideoRequest(BaseModel):
     video_url: str
     cuts: List[CutInstruction]
 
+class ExtractFramesRequest(BaseModel):
+    video_url: str
+    fps: float = 1.0
+    max_frames: int = 100
+
 @app.get("/")
 def home():
-    return {"status": "online", "message": "Video automation API is running!", "version": "0.4.0"}
+    return {"status": "online", "message": "Video automation API is running!", "version": "0.5.0"}
 
 @app.get("/health")
 def health_check():
@@ -251,14 +256,16 @@ def extract_frames_from_video(video_path: str, fps: float = 1.0, max_frames: int
     return frames
 
 @app.post("/extract-frames")
-async def extract_frames_endpoint(video_url: str, fps: float = 1.0, max_frames: int = 100):
+async def extract_frames_endpoint(request: ExtractFramesRequest):
     """
     Extract frames from video for GPT-4o analysis
     
-    Parameters:
-    - video_url: URL of the video to process
-    - fps: Frames per second to extract (default 1.0 = 1 frame per second)
-    - max_frames: Maximum number of frames to extract (default 100)
+    Example request body:
+    {
+        "video_url": "https://example.com/video.mp4",
+        "fps": 1.0,
+        "max_frames": 100
+    }
     
     Returns base64 encoded JPEG images ready to send to GPT-4o
     """
@@ -267,12 +274,12 @@ async def extract_frames_endpoint(video_url: str, fps: float = 1.0, max_frames: 
         video_id = "extract_frames_video"
         video_path = TEMP_DIR / f"{video_id}.mp4"
         
-        success = download_video(video_url, str(video_path))
+        success = download_video(request.video_url, str(video_path))
         if not success:
             raise HTTPException(status_code=400, detail="Failed to download video")
         
         # Extract frames
-        frames = extract_frames_from_video(str(video_path), fps, max_frames)
+        frames = extract_frames_from_video(str(video_path), request.fps, request.max_frames)
         
         if not frames:
             raise HTTPException(status_code=500, detail="Failed to extract frames from video")
@@ -281,8 +288,8 @@ async def extract_frames_endpoint(video_url: str, fps: float = 1.0, max_frames: 
             "status": "success",
             "frames_count": len(frames),
             "frames": frames,  # Array of base64 encoded images
-            "fps": fps,
-            "max_frames": max_frames,
+            "fps": request.fps,
+            "max_frames": request.max_frames,
             "note": "Frames are base64 encoded JPEGs (640px width), ready for GPT-4o"
         }
         
